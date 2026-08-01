@@ -193,6 +193,102 @@ def fijar_canal(interfaz: str, canal: int, ancho: str = "HT20") -> str:
 
 
 # ---------------------------------------------------------------------------
+# 3bis. Diccionarios de interpretacion 802.11 (reason/status codes)
+# ---------------------------------------------------------------------------
+
+_REASON_CODES = {
+    1: "No especificado", 2: "Autenticacion previa ya no valida",
+    3: "Deauth: STA abandona IBSS/ESS", 4: "Disassoc por inactividad",
+    5: "Disassoc: AP no puede gestionar mas STAs", 6: "Frame clase 2 de STA no autenticada",
+    7: "Frame clase 3 de STA no asociada", 8: "Disassoc: STA abandona el BSS",
+    9: "STA solicitando (re)asociacion no autenticada",
+    10: "Capacidades de potencia inaceptables", 11: "Canales soportados inaceptables",
+    12: "Disassoc por BSS Transition Management",
+    13: "Elemento invalido (IE mal formado)", 14: "Fallo de MIC (Message Integrity Code)",
+    15: "Timeout del 4-Way Handshake", 16: "Timeout del Group Key Handshake",
+    17: "Elemento distinto entre 4-Way Handshake y (Re)Assoc/Probe/Beacon",
+    18: "Cipher de grupo invalido", 19: "Cipher pairwise invalido",
+    20: "AKMP invalido", 21: "Version de RSNE no soportada",
+    22: "Capacidades RSNE invalidas", 23: "Fallo de autenticacion 802.1X",
+    24: "Cipher rechazado por politica de seguridad",
+    30: "Disassoc por falta de QoS", 31: "Disassoc por exceso de tramas sin ACK",
+    32: "Disassoc por condiciones de canal pobres", 33: "STA transmitiendo fuera de su TXOP",
+    34: "Exceso de perdida de tramas (peer)", 36: "Motivo QoS no especificado (peer)",
+    37: "No autorizado / requisitos regulatorios",
+    38: "AP sin canales disponibles", 39: "Disassoc por deteccion de radar",
+    40: "AP no soporta el cipher solicitado", 45: "Peer no soporta el cipher solicitado",
+    46: "Violacion de politica PMF (deauth protegido)",
+    47: "Frame de auth con numero de secuencia fuera de lo esperado",
+}
+
+_STATUS_CODES = {
+    0: "Exito", 1: "Fallo no especificado",
+    10: "No soporta todas las capacidades solicitadas",
+    11: "Reasociacion denegada: no se puede confirmar asociacion existente",
+    12: "Asociacion denegada (motivo fuera del estandar)",
+    13: "Algoritmo de autenticacion no soportado",
+    14: "Numero de secuencia de auth fuera de lo esperado",
+    15: "Auth rechazada: fallo de challenge",
+    16: "Auth rechazada: timeout esperando siguiente frame",
+    17: "AP no puede gestionar mas STAs asociadas",
+    18: "STA no soporta las tasas de datos requeridas (BSSBasicRateSet)",
+    19: "STA no soporta preambulo corto",
+    20: "STA no soporta gestion de espectro",
+    21: "STA no cumple requisitos de capacidad de potencia",
+    22: "STA no soporta los canales requeridos",
+    23: "STA no soporta Short Slot Time",
+    24: "STA no soporta DSSS-OFDM",
+    25: "Listen interval demasiado grande",
+    26: "Solicitud rechazada temporalmente, reintentar",
+    39: "STA no soporta HT",
+    40: "Violacion de politica PMF (Robust Management Frame)",
+    41: "Fallo no especificado relacionado con QoS",
+    43: "Asociacion denegada por condiciones de canal pobres",
+    50: "STA no soporta VHT",
+    94: "Se requiere Anti-Clogging Token",
+}
+
+
+def _parse_int_field(s: str) -> int | None:
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        return int(s, 16) if s.lower().startswith("0x") else int(s)
+    except ValueError:
+        return None
+
+
+def _describir_reason(valor: str) -> str:
+    codigo = _parse_int_field(valor)
+    if codigo is None:
+        return valor
+    return f"{codigo} ({_REASON_CODES.get(codigo, 'ver estandar 802.11')})"
+
+
+def _describir_status(valor: str) -> str:
+    codigo = _parse_int_field(valor)
+    if codigo is None:
+        return valor
+    return f"{codigo} ({_STATUS_CODES.get(codigo, 'ver estandar 802.11')})"
+
+
+def _traducir_columna(salida: str, num_campos: int, idx_codigo: int, traductor) -> str:
+    """Sustituye, linea a linea, la columna idx_codigo de una salida '-E separator=|'
+    por el resultado de traductor(valor). Deja intactas las lineas que no encajan
+    (errores, cabeceras, lineas con menos/mas campos)."""
+    lineas_out = []
+    for l in salida.split("\n"):
+        partes = l.split("|")
+        if len(partes) == num_campos and partes[idx_codigo].strip():
+            partes[idx_codigo] = traductor(partes[idx_codigo])
+            lineas_out.append("|".join(partes))
+        else:
+            lineas_out.append(l)
+    return "\n".join(lineas_out)
+
+
+# ---------------------------------------------------------------------------
 # 4. Captura filtrada en vivo (a texto)
 # ---------------------------------------------------------------------------
 
@@ -218,22 +314,25 @@ def capturar_management(interfaz: str, paquetes: int = 20) -> str:
 
 @mcp.tool()
 def capturar_asociacion(interfaz: str, paquetes: int = 20) -> str:
-    """Captura frames de ASOCIACION y reasociacion."""
+    """Captura frames de ASOCIACION y reasociacion, con el status_code traducido a texto."""
     df = ("wlan.fc.type_subtype==0x00 or wlan.fc.type_subtype==0x01 or "
           "wlan.fc.type_subtype==0x02 or wlan.fc.type_subtype==0x03")
     campos = ["frame.time_relative", "wlan.sa", "wlan.da", "wlan.bssid",
               "wlan.fc.type_subtype", "wlan.ssid", "wlan.fixed.status_code"]
-    return _captura_wlan(interfaz, df, paquetes, campos)
+    salida = _captura_wlan(interfaz, df, paquetes, campos)
+    return _traducir_columna(salida, len(campos), len(campos) - 1, _describir_status)
 
 
 @mcp.tool()
 def capturar_autenticacion(interfaz: str, paquetes: int = 20) -> str:
-    """Captura frames de AUTENTICACION y desautenticacion (auth, deauth, disassoc)."""
+    """Captura frames de AUTENTICACION y desautenticacion (auth, deauth, disassoc),
+    con el reason_code traducido a texto."""
     df = ("wlan.fc.type_subtype==0x0b or wlan.fc.type_subtype==0x0c or "
           "wlan.fc.type_subtype==0x0a")
     campos = ["frame.time_relative", "wlan.sa", "wlan.da", "wlan.bssid",
               "wlan.fc.type_subtype", "wlan.fixed.auth.alg", "wlan.fixed.reason_code"]
-    return _captura_wlan(interfaz, df, paquetes, campos)
+    salida = _captura_wlan(interfaz, df, paquetes, campos)
+    return _traducir_columna(salida, len(campos), len(campos) - 1, _describir_reason)
 
 
 @mcp.tool()
@@ -260,12 +359,131 @@ def capturar_beacons(interfaz: str, paquetes: int = 30) -> str:
     return _captura_wlan(interfaz, "wlan.fc.type_subtype==0x08", paquetes, campos)
 
 
+_EAPOL_KEY_INFO_KEYTYPE = 0x0008  # 1 = pairwise (M1-M4), 0 = group (G1-G2)
+_EAPOL_KEY_INFO_INSTALL = 0x0040
+_EAPOL_KEY_INFO_ACK     = 0x0080
+_EAPOL_KEY_INFO_MIC     = 0x0100
+_EAPOL_KEY_INFO_SECURE  = 0x0200
+
+
+def _clasificar_eapol_msg(key_info: int) -> str:
+    """Clasifica un frame EAPOL-Key en M1-M4 (pairwise) o G1-G2 (group) a partir
+    de los bits ACK/MIC/Secure/KeyType del key_info, sin depender de
+    eapol.keydes.msgnr (no disponible en todas las versiones de tshark)."""
+    pairwise = bool(key_info & _EAPOL_KEY_INFO_KEYTYPE)
+    ack = bool(key_info & _EAPOL_KEY_INFO_ACK)
+    mic = bool(key_info & _EAPOL_KEY_INFO_MIC)
+    secure = bool(key_info & _EAPOL_KEY_INFO_SECURE)
+
+    if pairwise:
+        if ack and not mic and not secure:
+            return "M1 (AP->STA, ANonce)"
+        if not ack and mic and not secure:
+            return "M2 (STA->AP, SNonce+MIC)"
+        if ack and mic and secure:
+            return "M3 (AP->STA, GTK+MIC, Install)"
+        if not ack and mic and secure:
+            return "M4 (STA->AP, Confirm)"
+        return "pairwise (patron key_info no reconocido)"
+    else:
+        if ack and mic:
+            return "G1 (AP->STA, Group Key)"
+        if not ack and mic:
+            return "G2 (STA->AP, Group Key ACK)"
+        return "group (patron key_info no reconocido)"
+
+
+def _analizar_eapol_capturado(salida: str) -> str:
+    """Post-procesa la salida de capturar_eapol: clasifica cada frame en M1-M4/G1-G2,
+    agrupa por par STA<->AP y detecta retransmisiones o handshakes incompletos."""
+    eventos = []
+    for l in salida.split("\n"):
+        partes = l.split("|")
+        if len(partes) != 5:
+            continue
+        t_str, sa, da, _eapol_type, key_info_str = partes
+        try:
+            t = float(t_str)
+        except ValueError:
+            continue
+        ki = _parse_int_field(key_info_str)
+        if ki is None:
+            continue
+        eventos.append({"t": t, "sa": sa, "da": da, "msg": _clasificar_eapol_msg(ki)})
+
+    if not eventos:
+        return salida
+
+    pares: dict[tuple, list] = {}
+    for e in eventos:
+        clave = tuple(sorted([e["sa"], e["da"]]))
+        pares.setdefault(clave, []).append(e)
+
+    resumen = ["", "=== Analisis 4-Way Handshake (M1-M4 / G1-G2) ==="]
+    for clave, evs in pares.items():
+        evs.sort(key=lambda e: e["t"])
+        secuencia = " -> ".join(e["msg"].split(" ")[0] for e in evs)
+        resumen.append(f"\nPar {clave[0]} <-> {clave[1]}:")
+        resumen.append(f"  Secuencia: {secuencia}")
+
+        m1_count = sum(1 for e in evs if e["msg"].startswith("M1"))
+        m3_count = sum(1 for e in evs if e["msg"].startswith("M3"))
+        tiene_m1 = m1_count > 0
+        tiene_m4 = any(e["msg"].startswith("M4") for e in evs)
+
+        if m1_count > 1:
+            resumen.append(f"  [!] M1 visto {m1_count} veces -> posible retransmision/timeout "
+                            f"(AP reenviando ANonce, esperando M2 del cliente)")
+        if m3_count > 1:
+            resumen.append(f"  [!] M3 visto {m3_count} veces -> posible retransmision/timeout "
+                            f"(AP reenviando GTK, esperando M4 del cliente)")
+        if tiene_m1 and not tiene_m4:
+            resumen.append("  [!] Handshake incompleto en esta captura: no se vio M4 "
+                            "(no termino en la ventana capturada, o fallo)")
+        elif tiene_m4:
+            resumen.append("  [OK] Handshake completo (se vieron M1..M4)")
+
+    return salida + "\n" + "\n".join(resumen)
+
+
 @mcp.tool()
 def capturar_eapol(interfaz: str, paquetes: int = 20) -> str:
-    """Captura frames EAPOL (handshake WPA/WPA2/WPA3 4-way)."""
+    """Captura frames EAPOL (handshake WPA/WPA2/WPA3 4-way), clasifica cada mensaje
+    en M1-M4/G1-G2 y detecta retransmisiones o handshakes incompletos por par STA-AP."""
     campos = ["frame.time_relative", "wlan.sa", "wlan.da",
               "eapol.type", "eapol.keydes.key_info"]
-    return _captura_wlan(interfaz, "eapol", paquetes, campos)
+    salida = _captura_wlan(interfaz, "eapol", paquetes, campos)
+    return _analizar_eapol_capturado(salida)
+
+
+@mcp.tool()
+def diagnosticar_autenticacion(interfaz: str, paquetes: int = 30) -> str:
+    """Diagnostico combinado de fallos de autenticacion (protocolo, no credenciales):
+    captura auth/deauth/disassoc (reason_code traducido) y EAPOL (clasificado M1-M4,
+    con deteccion de retransmision/timeout) en la misma pasada, y da un veredicto.
+
+    interfaz: interfaz en modo monitor (ej: 'wlan1mon').
+    paquetes: paquetes a esperar en cada una de las dos capturas (auth y EAPOL).
+    """
+    auth = capturar_autenticacion(interfaz, paquetes)
+    eapol = capturar_eapol(interfaz, paquetes)
+
+    veredicto = []
+    if "Timeout del 4-Way Handshake" in auth or "handshake incompleto" in eapol.lower():
+        veredicto.append("Posible fallo en el 4-Way Handshake (timeout/retransmision) "
+                          "-> revisar PSK/AKM/PMF configurados en el cliente.")
+    if "Fallo de autenticacion 802.1X" in auth:
+        veredicto.append("Fallo de autenticacion 802.1X -> revisar RADIUS/EAP en el lado servidor.")
+    if "Timeout del Group Key Handshake" in auth:
+        veredicto.append("Timeout del Group Key Handshake -> posible perdida de conectividad "
+                          "justo despues del 4-way.")
+    if not veredicto:
+        veredicto.append("Sin patrones de fallo reconocidos en esta captura; revisar manualmente "
+                          "las secciones de auth y EAPOL de abajo.")
+
+    return (f"=== AUTENTICACION / DEAUTH / DISASSOC ===\n{auth}\n\n"
+            f"=== EAPOL (4-Way Handshake) ===\n{eapol}\n\n"
+            f"=== VEREDICTO ===\n" + "\n".join(f"- {v}" for v in veredicto))
 
 
 @mcp.tool()
@@ -563,12 +781,28 @@ def estadisticas_wlan(interfaz: str, segundos: int = 15) -> str:
 # ── IDs de Information Elements 802.11 ──────────────────────────────────────
 _IE_SSID             = 0
 _IE_DS_PARAM         = 3
+_IE_RSN              = 48
 _IE_HT_CAPABILITIES  = 45
 _IE_HT_OPERATION     = 61
 _IE_VHT_CAPABILITIES = 191
 _IE_VHT_OPERATION    = 192
 _IE_EXTENSION        = 255   # Wi-Fi 6/6E usa IE extendido
 _IE_EXT_HE_CAP       = 35   # sub-ID dentro de IE 255
+
+_RSN_CIPHER_SUITES = {
+    1: "WEP-40", 2: "TKIP", 4: "CCMP-128 (AES)", 5: "WEP-104",
+    6: "BIP-CMAC-128", 8: "GCMP-128", 9: "GCMP-256", 10: "CCMP-256",
+    11: "BIP-GMAC-128", 12: "BIP-GMAC-256", 13: "BIP-CMAC-256",
+}
+
+_RSN_AKM_SUITES = {
+    1: "802.1X (WPA2-Enterprise)", 2: "PSK (WPA2-Personal)",
+    3: "FT-802.1X", 4: "FT-PSK", 5: "802.1X-SHA256", 6: "PSK-SHA256",
+    7: "TDLS", 8: "SAE (WPA3-Personal)", 9: "FT-SAE",
+    11: "802.1X-SuiteB-SHA256", 12: "802.1X-SuiteB-SHA384",
+    13: "FT-802.1X-SHA384", 14: "FILS-SHA256", 15: "FILS-SHA384",
+    16: "FT-FILS-SHA256", 17: "FT-FILS-SHA384", 18: "OWE",
+}
 
 
 def _bit(val, pos):
@@ -681,6 +915,53 @@ def _decode_vht_operation(data: bytes) -> dict:
     }
 
 
+def _rsn_suite_nombre(tabla: dict, data: bytes, offset: int) -> str:
+    if offset + 4 > len(data):
+        return "?"
+    oui = data[offset:offset + 3]
+    tipo = data[offset + 3]
+    nombre = tabla.get(tipo, f"desconocido({tipo})")
+    if oui != b"\x00\x0f\xac":
+        return f"{nombre} (OUI no estandar: {oui.hex()})"
+    return nombre
+
+
+def _decode_rsn_ie(data: bytes) -> dict:
+    """Decodifica el IE RSN (48): version, cipher de grupo/pairwise, AKM suites y PMF."""
+    if len(data) < 8:
+        return {"error": f"IE RSN demasiado corto ({len(data)} bytes, esperado >=8)"}
+    version = struct.unpack_from("<H", data, 0)[0]
+    group_cipher = _rsn_suite_nombre(_RSN_CIPHER_SUITES, data, 2)
+    off = 6
+    pairwise_count = struct.unpack_from("<H", data, off)[0]
+    off += 2
+    pairwise = []
+    for _ in range(pairwise_count):
+        pairwise.append(_rsn_suite_nombre(_RSN_CIPHER_SUITES, data, off))
+        off += 4
+
+    resultado = {
+        "version": version, "group_cipher": group_cipher, "pairwise_ciphers": pairwise,
+        "akm_suites": [], "pmf_capable": None, "pmf_required": None,
+    }
+    if off + 2 > len(data):
+        resultado["nota"] = "IE truncado antes de AKM suites"
+        return resultado
+
+    akm_count = struct.unpack_from("<H", data, off)[0]
+    off += 2
+    for _ in range(akm_count):
+        resultado["akm_suites"].append(_rsn_suite_nombre(_RSN_AKM_SUITES, data, off))
+        off += 4
+
+    if off + 2 <= len(data):
+        rsn_cap = struct.unpack_from("<H", data, off)[0]
+        resultado["preauth"] = bool(_bit(rsn_cap, 0))
+        resultado["pmf_required"] = bool(_bit(rsn_cap, 6))
+        resultado["pmf_capable"] = bool(_bit(rsn_cap, 7))
+    return resultado
+
+
 def _decode_he_capabilities(data: bytes) -> dict:
     if len(data) < 22:
         return {"error": f"IE HE demasiado corto ({len(data)} bytes)"}
@@ -739,6 +1020,8 @@ def _parse_ies(payload: bytes) -> dict:
                 ies["ssid"] = ie_data.hex()
         elif ie_id == _IE_DS_PARAM and ie_len >= 1:
             ies["ds_channel"] = ie_data[0]
+        elif ie_id == _IE_RSN:
+            ies["rsn"] = _decode_rsn_ie(ie_data)
         elif ie_id == _IE_HT_CAPABILITIES:
             ies["ht_capabilities"] = _decode_ht_capabilities(ie_data)
         elif ie_id == _IE_HT_OPERATION:
@@ -768,7 +1051,7 @@ def analizar_ies_pcap(nombre: str,
     filtro_bssid -- filtrar por BSSID exacto ('AA:BB:CC:DD:EE:FF'). Opcional.
 
     Devuelve por cada AP unico: generacion Wi-Fi, NSS, MCS set, BW, beamforming,
-    LDPC, Short GI, TWT (Wi-Fi 6) y canal.
+    LDPC, Short GI, TWT (Wi-Fi 6), canal, y seguridad (cifrado/AKM/PMF via RSN IE).
     """
     try:
         from scapy.all import rdpcap, Dot11, Dot11Beacon, Dot11Elt
@@ -860,6 +1143,25 @@ def analizar_ies_pcap(nombre: str,
         elif "vht_capabilities" in ies:
             gen = "Wi-Fi 5 (802.11ac)"
         lineas.append(f"Gen.  : {gen}")
+
+        # RSN / Seguridad (cifrado, AKM, PMF)
+        if "rsn" in ies:
+            rsn = ies["rsn"]
+            lineas.append("\n  [RSN - IE 48 (Seguridad)]")
+            if "error" in rsn:
+                lineas.append(f"    {rsn['error']}")
+            else:
+                lineas.append(f"    Cifrado de grupo   : {rsn.get('group_cipher')}")
+                lineas.append(f"    Cifrado pairwise   : {', '.join(rsn.get('pairwise_ciphers') or []) or '?'}")
+                lineas.append(f"    AKM (autenticacion): {', '.join(rsn.get('akm_suites') or []) or '?'}")
+                pmf_r, pmf_c = rsn.get("pmf_required"), rsn.get("pmf_capable")
+                if pmf_r is not None:
+                    pmf_txt = "Requerido (obligatorio)" if pmf_r else ("Capaz (opcional)" if pmf_c else "No soportado")
+                    lineas.append(f"    PMF                : {pmf_txt}")
+                if rsn.get("nota"):
+                    lineas.append(f"    Nota               : {rsn['nota']}")
+        else:
+            lineas.append("\n  [RSN - IE 48] : no presente (red abierta o WEP/WPA1)")
 
         # HT Capabilities
         if "ht_capabilities" in ies:

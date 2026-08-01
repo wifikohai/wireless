@@ -14,6 +14,18 @@ Servidor MCP `tshark-remoto` (`tshark_server.py`, FastMCP, 23 tools) corre en un
 
 Más un requisito transversal: **persistencia/histórico** entre sesiones (hoy no existe — solo se guardan PCAPs crudos, ningún resultado estructurado).
 
+## Adaptadores disponibles (verificado en vivo, 01/08/2026)
+
+Inventario real del host (`listar_interfaces` + `capacidades_phy`), no asunciones del prompt original:
+
+| Interfaz | Phy | Modo monitor | Bandas | Notas |
+|---|---|---|---|---|
+| `wlan1` | phy1 | Sí | 2.4 + 5 GHz (HT/VHT) | Único radio monitor-capable. `#channels <= 1` en sus combos válidos → **no puede escuchar 2 canales a la vez**, ni con interfaces virtuales. |
+| `wlan0` | phy0 | No | 2.4 + 5 GHz (HT/VHT single-stream) | Solo managed: escaneo (`escanear_redes`/`escanear_ssid`) o asociación real. |
+| `eth0` | — | — (cableada) | — | SPAN port del mismo host (Raspberry Pi, usuario `usuario`), compartido con el laboratorio Wazuh-ThreatHunting. Fuera de alcance para troubleshooting WiFi — no confundir. |
+
+**Implicación para el diseño:** no hay verdadero multi-canal simultáneo sin un segundo adaptador USB monitor-capable (no presente hoy). Lo que sí es viable con el hardware actual es **paralelismo monitor + managed**: `wlan1` en modo monitor capturando tramas crudas mientras `wlan0` se mantiene en managed para verificar el lado "real" de la conexión (RSSI/latencia tal como lo ve un cliente asociado, o un escaneo de vecinos sin interrumpir la captura). Se aplica en Fase 1 y Fase 3 más abajo.
+
 ## Gaps identificados en `tshark_server.py` (revisión de código, no especulación)
 
 | # | Caso de uso | Gap concreto |
@@ -37,17 +49,20 @@ Más un requisito transversal: **persistencia/histórico** entre sesiones (hoy n
 - Añadir `_decode_rsn_ie()` (AKM suites, pairwise/group cipher, MFPC/MFPR) e integrarlo en `analizar_ies_pcap`.
 - Diccionario de reason/status codes 802.11 estándar aplicado en `capturar_autenticacion`/`capturar_asociacion`.
 - (Opcional) tool nueva `diagnosticar_autenticacion(interfaz, cliente_mac)` que combine las tres piezas en un veredicto único.
+- (Opcional, usa `wlan0` en paralelo) si el caso lo permite, asociar `wlan0` en managed al mismo SSID para confirmar si el fallo es reproducible desde un cliente real mientras `wlan1` captura en monitor — no siempre aplicable (depende de credenciales disponibles), evaluar caso a caso.
 
 ### Fase 2 — Fallos de roaming
 - Tool nueva `reconstruir_roaming(pcap_o_interfaz, cliente_mac)`: une eventos por MAC cliente y calcula el gap de roaming (ms entre última trama data en AP viejo y primera en AP nuevo).
 - Decodificar IEs 802.11k/v/r en `analizar_ies_pcap` para confirmar soporte real AP+cliente de fast-roaming.
 - Detección de sticky client comparando RSSI del AP asociado vs RSSI de otros BSSID del mismo SSID vistos en la misma ventana.
+- **Limitación de hardware a tener en cuenta:** `wlan1` es un único radio (un canal a la vez), así que si el AP origen y destino están en canales distintos no se puede capturar el roam completo en tiempo real con un solo pase — la reconstrucción tendrá que apoyarse en `capturar_a_pcap` de más duración en el canal más probable, o en analizar el evento a posteriori vía beacons/probes ya vistos, no en captura simultánea de ambos canales.
 
 ### Fase 3 — "WiFi lento" / interferencia RF
 - Añadir `wlan.fc.retry` a las capturas relevantes y calcular % de retry.
 - Extender `survey_canales` (o tool nueva) para calcular utilización % (busy/active time) y ranking de canales en vez de volcar texto crudo.
 - Combinar señal + ruido → SNR real por canal/cliente.
 - Contar BSSID vecinos co-channel/adjacent-channel a partir de `escanear_redes`.
+- Cruzar el SNR calculado desde `wlan1` (monitor) con la calidad de enlace real reportada por `wlan0` (managed, `iw dev wlan0 link`: signal, bitrate) como referencia de "lo que ve un cliente real" en paralelo a la captura cruda.
 
 ### Fase 4 — Persistencia / histórico
 - Definir dónde vive el histórico: **pendiente de decidir** — en el servidor remoto (`~/mcp_tshark/historial/`, cerca de los PCAPs) vs en este repo (`Wireless/history/`, versionado en git). Se recomienda servidor remoto + tool `listar_historial()`/`comparar_historial()` para que Claude lo consulte, ya que el histórico crece con cada sesión real y no tiene sentido commitear cada resultado.
