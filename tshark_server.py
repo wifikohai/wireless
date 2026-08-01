@@ -109,16 +109,20 @@ def activar_modo_monitor(interfaz: str, metodo: str = "airmon") -> str:
 
     if metodo == "airmon":
         import time
-        salida = f"=== airmon-ng stop {interfaz} ===\n"
-        salida += _run(["airmon-ng", "stop", interfaz], timeout=20, usar_sudo=True)
-        # Levantar explicitamente la interfaz base
+        salida = f"=== airmon-ng start {interfaz} ===\n"
+        salida += _run(["airmon-ng", "start", interfaz], timeout=20, usar_sudo=True)
+        # Con airmon-ng moderno (no destructivo) la interfaz base puede quedar
+        # como VIF managed residual en el mismo phy que la nueva *mon; si se deja
+        # 'up' bloquea fijar_canal en la interfaz monitor con "Device or resource
+        # busy". Bajarla es seguro aunque no exista (falla en stderr, no fatal).
         iface_base = interfaz.replace("mon", "")
-        salida += f"\n\n=== Levantar {iface_base} ===\n"
-        salida += _run(["ip", "link", "set", iface_base, "up"], usar_sudo=True)
+        salida += f"\n\n=== Bajar {iface_base} (VIF managed residual) ===\n"
+        salida += _run(["ip", "link", "set", iface_base, "down"], usar_sudo=True)
         time.sleep(5)
         salida += "\n\n=== Reiniciar NetworkManager ===\n"
         salida += _run(["systemctl", "restart", "NetworkManager"], timeout=20, usar_sudo=True)
         time.sleep(8)
+        return salida
     elif metodo == "iw":
         pasos = []
         pasos.append(("ip link down", _run(["ip", "link", "set", interfaz, "down"], usar_sudo=True)))
@@ -365,6 +369,13 @@ _EAPOL_KEY_INFO_ACK     = 0x0080
 _EAPOL_KEY_INFO_MIC     = 0x0100
 _EAPOL_KEY_INFO_SECURE  = 0x0200
 
+_EAPOL_MSGNR_DESC = {
+    1: "M1 (AP->STA, ANonce)",
+    2: "M2 (STA->AP, SNonce+MIC)",
+    3: "M3 (AP->STA, GTK+MIC, Install)",
+    4: "M4 (STA->AP, Confirm)",
+}
+
 
 def _clasificar_eapol_msg(key_info: int) -> str:
     """Clasifica un frame EAPOL-Key en M1-M4 (pairwise) o G1-G2 (group) a partir
@@ -395,21 +406,30 @@ def _clasificar_eapol_msg(key_info: int) -> str:
 
 def _analizar_eapol_capturado(salida: str) -> str:
     """Post-procesa la salida de capturar_eapol: clasifica cada frame en M1-M4/G1-G2,
-    agrupa por par STA<->AP y detecta retransmisiones o handshakes incompletos."""
+    agrupa por par STA<->AP y detecta retransmisiones o handshakes incompletos.
+
+    Usa wlan_rsna_eapol.keydes.msgnr (numero de mensaje ya calculado por tshark)
+    cuando esta presente; si no (p.ej. mensajes de Group Key, que msgnr no cubre),
+    cae al decodificador de bits de key_info."""
     eventos = []
     for l in salida.split("\n"):
         partes = l.split("|")
         if len(partes) != 5:
             continue
-        t_str, sa, da, _eapol_type, key_info_str = partes
+        t_str, sa, da, msgnr_str, key_info_str = partes
         try:
             t = float(t_str)
         except ValueError:
             continue
+        msgnr = _parse_int_field(msgnr_str)
         ki = _parse_int_field(key_info_str)
-        if ki is None:
+        if msgnr in _EAPOL_MSGNR_DESC:
+            msg = _EAPOL_MSGNR_DESC[msgnr]
+        elif ki is not None:
+            msg = _clasificar_eapol_msg(ki)
+        else:
             continue
-        eventos.append({"t": t, "sa": sa, "da": da, "msg": _clasificar_eapol_msg(ki)})
+        eventos.append({"t": t, "sa": sa, "da": da, "msg": msg})
 
     if not eventos:
         return salida
@@ -450,8 +470,10 @@ def _analizar_eapol_capturado(salida: str) -> str:
 def capturar_eapol(interfaz: str, paquetes: int = 20) -> str:
     """Captura frames EAPOL (handshake WPA/WPA2/WPA3 4-way), clasifica cada mensaje
     en M1-M4/G1-G2 y detecta retransmisiones o handshakes incompletos por par STA-AP."""
+    # Wireshark/tshark disecciona el key descriptor RSNA bajo wlan_rsna_eapol.*
+    # (no eapol.keydes.* como en versiones/dissectors mas antiguos).
     campos = ["frame.time_relative", "wlan.sa", "wlan.da",
-              "eapol.type", "eapol.keydes.key_info"]
+              "wlan_rsna_eapol.keydes.msgnr", "wlan_rsna_eapol.keydes.key_info"]
     salida = _captura_wlan(interfaz, "eapol", paquetes, campos)
     return _analizar_eapol_capturado(salida)
 

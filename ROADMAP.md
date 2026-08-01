@@ -69,6 +69,25 @@ Inventario real del host (`listar_interfaces` + `capacidades_phy`), no asuncione
 - Tool `guardar_resultado_sesion(...)` que cada troubleshooting invoque al final: JSON con fecha, caso de uso, interfaz/canal, métricas clave, conclusión, acción recomendada.
 - `baselines.md` con umbrales por defecto (RSSI, retry%, utilización) contra los que juzgar "bien/mal" — a validar con el usuario antes de fijarlos como default.
 
+## Validación Fase 1 (01/08/2026, contra la Raspberry Pi real)
+
+Desplegado en `/home/usuario/mcp_tshark/tshark_server.py` y validado en vivo (backup previo: `tshark_server.py.bak_20260801_174340`).
+
+**Bugs preexistentes encontrados y corregidos durante la validación (bloqueaban todo el roadmap, no solo la Fase 1):**
+1. `activar_modo_monitor(metodo="airmon")` no hacia `return salida` → siempre devolvia `None` y fallaba con un error de validacion Pydantic.
+2. `activar_modo_monitor(metodo="airmon")` ejecutaba `airmon-ng stop {interfaz}` en vez de `airmon-ng start {interfaz}` (copy-paste de `desactivar_modo_monitor`) → el modo monitor nunca se activaba realmente.
+3. Tras crear el VIF monitor, el codigo hacia `ip link set {iface_base} up` (dejando la interfaz managed residual levantada) en vez de bajarla → `fijar_canal` fallaba con "Device or resource busy". Corregido a `down`.
+4. `capturar_eapol` usaba los campos `eapol.type` / `eapol.keydes.key_info`, que no existen en tshark 4.0.17 de este host (dissector real: `wlan_rsna_eapol.keydes.*`, que ademas ya trae `msgnr` con el numero de mensaje M1-M4 calculado). Corregido, y `_analizar_eapol_capturado` ahora usa `msgnr` como fuente primaria y el decodificador de bits de `key_info` como respaldo (util para G1/G2, que `msgnr` no cubre).
+
+**Validado con datos reales:**
+- Decoder RSN (`analizar_ies_pcap` sobre una captura real de `wlan1`): AKM, cipher y PMF correctos contra 2 AP reales del entorno (WPA2-Personal, CCMP-128, PMF no soportado).
+- `activar_modo_monitor` → `fijar_canal` → `desactivar_modo_monitor` en `wlan1`/`wlan1mon`, ciclo completo en vivo tras los fixes 1-3.
+- Nombres de campo de `capturar_autenticacion`/`capturar_asociacion` (`wlan.fixed.reason_code`, `wlan.fixed.status_code`, `wlan.fixed.auth.alg`) confirmados validos en tshark 4.0.17.
+
+**No se pudo validar con trafico real (no es un fallo del codigo, es ausencia de eventos):** ni el PCAP historico ni la ventana de captura en vivo contenian frames de auth/deauth/disassoc/EAPOL — el entorno no tuvo esos eventos durante la prueba. La clasificacion M1-M4/G1-G2 y la traduccion de reason/status code estan revisadas contra el estandar 802.11 y corren sin errores de tshark, pero falta una pasada con un evento real (una asociacion o un deauth real) para confirmar el resultado end-to-end. No se ha forzado trafico (deauth activo) por no ser una accion pasiva/autorizada para este entorno.
+
+**Hallazgo adicional fuera de alcance de esta fase (pendiente, no bloqueante):** `leer_pcap(modo="wlan")` usa `-z wlan,stat`, invalido en tshark 4.0.17 (el nombre correcto seria `conv,wlan` o `endpoints,wlan`). No se ha corregido en esta pasada.
+
 ## Ejecución
 
 - Fases secuenciales. Dentro de cada fase, las tareas independientes (p.ej. Fase 1: decoder RSN vs. tabla de reason codes) se implementan en paralelo con subagentes.
