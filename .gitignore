@@ -1,0 +1,17 @@
+# Capturas: privadas por defecto (pueden contener SSID/MAC/tráfico de terceros
+# captado incidentalmente en el entorno de RF). Solo se sube al repo lo que se
+# mueva a mano a capturas_publicas/ tras revisar que no identifica a nadie.
+/capturas/
+
+# Material de descifrado WPA (nunca debe salir del host, ver CLAUDE.md §2)
+wireshark_profile/
+80211_keys
+
+# Backups de despliegue y bytecode Python
+*.bak_*
+__pycache__/
+*.pyc
+
+# Config local de Claude Code (ya cubierto por el gitignore global, se deja
+# explícito por claridad)
+.claude/settings.local.json

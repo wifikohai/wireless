@@ -9,14 +9,27 @@ Host: Raspberry Pi (`usuario@10.10.1.142`), interfaz `wlan1` (única con soporte
 Alcance actual: **troubleshooting de cliente/RF** (no auditoría de seguridad ni pipeline SOC). Ver [ROADMAP.md](ROADMAP.md) para el detalle completo de objetivos, gaps identificados y fases.
 
 - ✅ **Fase 1 — Fallos de autenticación (protocolo):** clasificación EAPOL M1-M4/G1-G2, traducción de reason/status code, decoder de IE RSN (cipher/AKM/PMF). Implementada y validada contra el host real (ver "Validación Fase 1" en el roadmap) — incluyó corregir 4 bugs preexistentes que dejaban el modo monitor completamente inoperativo.
-- ⬜ Fase 2 — Fallos de roaming
+- ✅ **Descifrado WPA / conectividad post-asociación** (fuera de fase, 06/08/2026): caso "asocia pero no navega". Ver la sección correspondiente en el roadmap.
+- ✅ **Modernización de IEs y escaneo estructurado** (fuera de fase, 12/09/2026): decodificación hasta Wi-Fi 7 (EHT/MLO/6E), soporte de roaming 802.11k/r/v en AP y cliente, tools nuevas `perfilar_cliente_pcap` y `escanear_a_pcap`. Derivado de adoptar [WLAN Pi](https://github.com/wlan-pi) como referencia; corrigió 6 bugs preexistentes. Ver la sección correspondiente en el roadmap.
+- ⬜ Fase 2 — Fallos de roaming (el bloque de IEs k/r/v ya está hecho; falta la línea de tiempo del roam y la detección de sticky client)
 - ⬜ Fase 3 — "WiFi lento" / interferencia RF
 - ⬜ Fase 4 — Persistencia / histórico
 
 ## Estructura
 
-- `tshark_server.py` — servidor MCP (23+ tools: descubrimiento de interfaces, modo monitor, captura filtrada en vivo, captura a PCAP, lectura/análisis de PCAP, decodificación de IEs 802.11).
+- `tshark_server.py` — servidor MCP (27 tools: descubrimiento de interfaces, modo monitor, captura filtrada en vivo, captura a PCAP, lectura/análisis de PCAP, decodificación de IEs 802.11 hasta Wi-Fi 7, perfilado de clientes, escaneo estructurado, descifrado WPA).
 - `ROADMAP.md` — objetivos, gaps identificados en el código, fases, y registro de validación contra el servidor real.
+- [`docs/guia_101_mcp_tshark.md`](docs/guia_101_mcp_tshark.md) — guía "formato 101" de las 27 tools del servidor MCP: qué hace cada una, cómo pedírselo a Claude y flujos completos de ejemplo, pensada para quien no conoce el proyecto.
+
+## Descifrado WPA
+
+Desactivado por defecto. Para activarlo, crear a mano en el host el fichero de claves (formato UAT de Wireshark, permisos 600):
+
+```bash
+ssh usuario@10.10.1.142 "umask 077 && printf '%s\n' '\"wpa-pwd\",\"MI_PASSPHRASE:MI_SSID\"' > ~/mcp_tshark/wireshark_profile/80211_keys"
+```
+
+Las claves no se pasan nunca como parámetro de una tool (quedarían en la conversación) ni en la línea de comandos de tshark (visible vía `ps`): se le pasan a tshark con `WIRESHARK_CONFIG_DIR` apuntando a `~/mcp_tshark/wireshark_profile/`. `estado_descifrado_wpa()` verifica el estado sin revelar el material de clave.
 
 ## Despliegue
 
@@ -29,3 +42,22 @@ ssh usuario@10.10.1.142 "sudo systemctl restart mcp-tshark.service"
 ```
 
 Siempre con backup previo del fichero en producción (`tshark_server.py.bak_<timestamp>`) y verificación de sintaxis antes del swap.
+
+### Dependencia opcional: `scandump`
+
+`escanear_a_pcap` requiere el binario [`scandump`](https://github.com/WLAN-Pi/scandump) (C, BSD-3-Clause), y `escanear_ssid` lo aprovecha si está presente. **No es obligatorio**: sin él, `escanear_ssid` cae automáticamente al parseo de `iw scan` y el resto del servidor no se entera.
+
+Se instala una sola vez en el host:
+
+```bash
+sudo apt-get install -y build-essential libnl-genl-3-dev libpcap-dev
+git clone https://github.com/WLAN-Pi/scandump && cd scandump && make
+sudo install -m 755 scandump /usr/local/bin/scandump
+sudo setcap cap_net_admin+ep /usr/local/bin/scandump
+```
+
+El `setcap` es deliberado: escanea con `CAP_NET_ADMIN` en vez de con sudo completo. Verificar con `/sbin/getcap /usr/local/bin/scandump`.
+
+## Referencias externas
+
+- [WLAN Pi](https://github.com/wlan-pi) — proyecto open-source de hardware/software para troubleshooting WiFi (captura, análisis 802.11, herramientas de RF). Referencia de dominio para el enfoque de diagnóstico de cliente/RF de este proyecto.
