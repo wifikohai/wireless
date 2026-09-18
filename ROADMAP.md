@@ -22,7 +22,7 @@ Inventario real del host (`listar_interfaces` + `capacidades_phy`), no asuncione
 |---|---|---|---|---|
 | `wlan1` | phy1 | Sí | 2.4 + 5 GHz (HT/VHT) | Único radio monitor-capable. `#channels <= 1` en sus combos válidos → **no puede escuchar 2 canales a la vez**, ni con interfaces virtuales. |
 | `wlan0` | phy0 | No | 2.4 + 5 GHz (HT/VHT single-stream) | Solo managed: escaneo (`escanear_redes`/`escanear_ssid`) o asociación real. |
-| `eth0` | — | — (cableada) | — | SPAN port del mismo host (Raspberry Pi, usuario `usuario`), compartido con el laboratorio Wazuh-ThreatHunting. Fuera de alcance para troubleshooting WiFi — no confundir. |
+| `eth0` | — | — (cableada) | — | SPAN port del mismo host (Raspberry Pi), compartido con el laboratorio Wazuh-ThreatHunting. Fuera de alcance para troubleshooting WiFi — no confundir. |
 
 **Implicación para el diseño:** no hay verdadero multi-canal simultáneo sin un segundo adaptador USB monitor-capable (no presente hoy). Lo que sí es viable con el hardware actual es **paralelismo monitor + managed**: `wlan1` en modo monitor capturando tramas crudas mientras `wlan0` se mantiene en managed para verificar el lado "real" de la conexión (RSSI/latencia tal como lo ve un cliente asociado, o un escaneo de vecinos sin interrumpir la captura). Se aplica en Fase 1 y Fase 3 más abajo.
 
