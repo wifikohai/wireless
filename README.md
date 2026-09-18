@@ -1,31 +1,42 @@
-# Wireless
+# Wireless — troubleshooting WiFi con Claude
 
-Servidor MCP (`tshark_server.py`) que expone herramientas de captura y análisis 802.11 (tshark/iw/scapy) sobre un adaptador WiFi en modo monitor, para que Claude haga troubleshooting real de cliente/RF sin que el analista tenga que ejecutar tshark a mano.
+¿Alguna vez has tenido que decirle a alguien "espera, deja que capture con tshark a ver qué está pasando" y luego perder media hora leyendo hexadecimal? Este proyecto existe para quitarte ese paso de en medio.
 
-## Estado
+`tshark-remoto` es un servidor MCP que le da a Claude acceso directo a un adaptador WiFi en modo monitor sobre una Raspberry Pi. En vez de que tú captures tráfico 802.11 a mano y luego pegues la salida de tshark en el chat, le pides a Claude en lenguaje normal — "¿por qué este cliente no consigue asociarse?", "captúrame los beacons de este SSID", "dime si esta red soporta 802.11r" — y Claude ejecuta la captura, la analiza y te devuelve un diagnóstico.
 
-Host: Raspberry Pi (`usuario@10.10.1.142`), interfaz `wlan1` (única con soporte de modo monitor; `wlan0` es managed-only). Servicio systemd `mcp-tshark.service`, FastMCP sobre `streamable-http` en el puerto 8000.
+## ¿Para qué sirve, y para qué no?
 
-Alcance actual: **troubleshooting de cliente/RF** (no auditoría de seguridad ni pipeline SOC). Ver [ROADMAP.md](ROADMAP.md) para el detalle completo de objetivos, gaps identificados y fases.
+Está pensado para troubleshooting real de cliente y de RF: problemas de autenticación, roaming, interferencia, o el clásico "el cliente se asocia pero no navega". **No** es una herramienta de auditoría de seguridad ni un pipeline de SOC — esa fue una decisión deliberada, así que no vas a encontrar aquí integración con APIs de seguridad ni nada orientado a detección de intrusos.
 
-- ✅ **Fase 1 — Fallos de autenticación (protocolo):** clasificación EAPOL M1-M4/G1-G2, traducción de reason/status code, decoder de IE RSN (cipher/AKM/PMF). Implementada y validada contra el host real (ver "Validación Fase 1" en el roadmap) — incluyó corregir 4 bugs preexistentes que dejaban el modo monitor completamente inoperativo.
-- ✅ **Descifrado WPA / conectividad post-asociación** (fuera de fase, 06/08/2026): caso "asocia pero no navega". Ver la sección correspondiente en el roadmap.
-- ✅ **Modernización de IEs y escaneo estructurado** (fuera de fase, 12/09/2026): decodificación hasta Wi-Fi 7 (EHT/MLO/6E), soporte de roaming 802.11k/r/v en AP y cliente, tools nuevas `perfilar_cliente_pcap` y `escanear_a_pcap`. Derivado de adoptar [WLAN Pi](https://github.com/wlan-pi) como referencia; corrigió 6 bugs preexistentes. Ver la sección correspondiente en el roadmap.
-- ⬜ Fase 2 — Fallos de roaming (el bloque de IEs k/r/v ya está hecho; falta la línea de tiempo del roam y la detección de sticky client)
-- ⬜ Fase 3 — "WiFi lento" / interferencia RF
-- ⬜ Fase 4 — Persistencia / histórico
+## Qué puede hacer hoy
 
-## Estructura
+- **Ver qué hay alrededor**: listar interfaces, consultar capacidades del adaptador, escanear redes y SSIDs concretos.
+- **Capturar en vivo, ya filtrado**: beacons, probe requests, autenticación, asociación, EAPOL (4-way handshake), tráfico de management/control/datos, estadísticas de la WLAN — sin que tengas que escribir un filtro de tshark.
+- **Trabajar con capturas guardadas (PCAP)**: leerlas, descifrar WPA si hace falta, y sobre todo *interpretarlas*:
+  - perfilar un punto de acceso a partir de sus beacons (hasta qué generación WiFi soporta, hasta Wi-Fi 7; si tiene roaming 802.11k/r/v; qué seguridad anuncia),
+  - perfilar un cliente a partir de su Association Request (capacidades, bandas, si su MAC está aleatorizada, fabricante por OUI),
+  - diagnosticar automáticamente un fallo de autenticación (te dice si fue un timeout del 4-way handshake, un fallo 802.1X, etc., no solo te enseña los paquetes),
+  - diagnosticar por qué un cliente asociado no tiene conectividad (revisa DHCP/ARP/DNS descifrando su tráfico).
 
-- `tshark_server.py` — servidor MCP (27 tools: descubrimiento de interfaces, modo monitor, captura filtrada en vivo, captura a PCAP, lectura/análisis de PCAP, decodificación de IEs 802.11 hasta Wi-Fi 7, perfilado de clientes, escaneo estructurado, descifrado WPA).
-- `ROADMAP.md` — objetivos, gaps identificados en el código, fases, y registro de validación contra el servidor real.
-- [`docs/guia_101_mcp_tshark.md`](docs/guia_101_mcp_tshark.md) — guía "formato 101" de las 27 tools del servidor MCP: qué hace cada una, cómo pedírselo a Claude y flujos completos de ejemplo, pensada para quien no conoce el proyecto.
+En total son 27 herramientas — el detalle completo de cada una, con ejemplos de cómo pedírselas a Claude, está en la [guía 101](docs/guia_101_mcp_tshark.md), pensada para que la pueda seguir alguien que no ha tocado este proyecto en su vida.
 
-## Integración MCP en el cliente
+## Cómo está montado
 
-El servidor expone MCP sobre `streamable-http`, no `stdio`. Un cliente que solo sabe lanzar procesos locales (como Claude Desktop) necesita un puente: se usa [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) (requiere Node.js/`npx` instalado en la máquina del cliente, no en el host) para traducir stdio ↔ HTTP.
+El servidor corre en una Raspberry Pi con un adaptador USB dedicado (`wlan1`, chipset MediaTek MT7612U) que es el único capaz de entrar en modo monitor — el WiFi integrado de la Pi (`wlan0`) solo puede escanear y asociarse como un cliente normal. El servicio (`mcp-tshark.service`, FastMCP sobre `streamable-http` en el puerto 8000) se despliega y se administra a mano, sin CI/CD: se edita el código en local, se copia por `scp`, se valida la sintaxis y se reinicia el servicio.
 
-**Claude Desktop** — añadir en `claude_desktop_config.json` (`%APPDATA%\Claude\claude_desktop_config.json` en Windows; `~/Library/Application Support/Claude/claude_desktop_config.json` en macOS; `~/.config/Claude/claude_desktop_config.json` en Linux):
+## Requisitos
+
+Para usar el servidor tal cual está desplegado, en tu propia máquina solo necesitas:
+
+- Un cliente MCP (Claude Desktop o Claude Code).
+- [Node.js](https://nodejs.org/) instalado, porque la conexión pasa por [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) (el servidor habla `streamable-http`, no `stdio`, así que hace falta un puente).
+- Acceso de red a la Raspberry Pi (por defecto, `10.10.1.142:8000`).
+
+Si en cambio quieres tocar o redesplegar el propio servidor, necesitas acceso SSH al host y Python 3 en la Raspberry Pi (entorno virtual ya preparado en `/home/usuario/mcp_tshark/mcp_env`).
+
+## Cómo conectarlo a tu Claude
+
+**Claude Desktop** — añade esto en `claude_desktop_config.json` (`%APPDATA%\Claude\claude_desktop_config.json` en Windows; `~/Library/Application Support/Claude/claude_desktop_config.json` en macOS; `~/.config/Claude/claude_desktop_config.json` en Linux):
 
 ```json
 "tshark-remoto": {
@@ -41,31 +52,49 @@ El servidor expone MCP sobre `streamable-http`, no `stdio`. Un cliente que solo 
 }
 ```
 
-- `--allow-http`: el servidor no tiene TLS (solo pensado para la LAN doméstica), así que hay que permitir HTTP explícitamente o `mcp-remote` lo rechaza.
-- `--transport http-only`: evita que `mcp-remote` pruebe primero SSE (este servidor no lo expone) antes de caer a streamable-http, así falla rápido si el host no responde en vez de colgarse en el fallback.
-- Reiniciar Claude Desktop tras editar el fichero para que recargue la config.
+- `--allow-http` hace falta porque el servidor no tiene TLS (pensado solo para la LAN doméstica), así que hay que permitir HTTP explícitamente.
+- `--transport http-only` evita que `mcp-remote` pierda tiempo probando SSE (que este servidor no ofrece) antes de caer a streamable-http.
+- Reinicia Claude Desktop después de guardar el fichero.
 
-**Claude Code (CLI)** — equivalente sin editar JSON a mano:
+**Claude Code (CLI)** — el mismo resultado sin tocar JSON a mano:
 
 ```bash
 claude mcp add tshark-remoto -- npx -y mcp-remote http://10.10.1.142:8000/mcp --allow-http --transport http-only
 ```
 
-Verificar con `claude mcp list` que queda como `connected`.
+Comprueba con `claude mcp list` que aparece como `connected`.
+
+## Estructura del repo
+
+- [`tshark_server.py`](tshark_server.py) — el servidor MCP en sí, con las 27 herramientas.
+- [`ROADMAP.md`](ROADMAP.md) — objetivos, fases del proyecto y el registro detallado de validación contra el servidor real.
+- [`docs/guia_101_mcp_tshark.md`](docs/guia_101_mcp_tshark.md) — guía paso a paso de las 27 herramientas para quien llega sin contexto previo.
+- `.claude/skills/wireless-troubleshooting/` — catálogo de problemas ya investigados en este servidor (bugs de infraestructura, workarounds confirmados) para no repetir la depuración dos veces.
+
+## En qué punto va esto
+
+- ✅ **Fase 1 — Fallos de autenticación**: clasificación EAPOL (M1-M4/G1-G2), traducción de reason/status codes, decodificación de IEs RSN (cifrado, AKM, PMF). Validada contra el host real.
+- ✅ **Descifrado WPA y conectividad post-asociación**: el caso "se asocia pero no navega", resuelto fuera de fase.
+- ✅ **IEs modernos y escaneo estructurado**: soporte hasta Wi-Fi 7 (EHT/MLO/6E) y roaming 802.11k/r/v, más las herramientas de perfilado de cliente y escaneo a PCAP. Este bloque se apoyó en el proyecto [WLAN Pi](https://github.com/wlan-pi) como referencia de dominio.
+- ⬜ Fase 2 — Fallos de roaming (falta la línea de tiempo del roam y detectar "sticky clients")
+- ⬜ Fase 3 — "WiFi va lento" / interferencia de RF
+- ⬜ Fase 4 — Persistencia e histórico
+
+El detalle completo, incluidos los bugs encontrados y corregidos por el camino, está en el [ROADMAP.md](ROADMAP.md).
 
 ## Descifrado WPA
 
-Desactivado por defecto. Para activarlo, crear a mano en el host el fichero de claves (formato UAT de Wireshark, permisos 600):
+Viene desactivado por defecto. Si lo necesitas, la clave se crea a mano directamente en el host (nunca como parámetro de una herramienta, porque quedaría registrada en la conversación):
 
 ```bash
 ssh usuario@10.10.1.142 "umask 077 && printf '%s\n' '\"wpa-pwd\",\"MI_PASSPHRASE:MI_SSID\"' > ~/mcp_tshark/wireshark_profile/80211_keys"
 ```
 
-Las claves no se pasan nunca como parámetro de una tool (quedarían en la conversación) ni en la línea de comandos de tshark (visible vía `ps`): se le pasan a tshark con `WIRESHARK_CONFIG_DIR` apuntando a `~/mcp_tshark/wireshark_profile/`. `estado_descifrado_wpa()` verifica el estado sin revelar el material de clave.
+`estado_descifrado_wpa()` te confirma que todo está en orden sin revelar nunca el contenido de la clave.
 
-## Despliegue
+## Desplegar un cambio
 
-El código se edita localmente y se despliega a mano al host:
+No hay pipeline automático: el flujo es editar en local, copiar, validar y reiniciar.
 
 ```bash
 scp tshark_server.py usuario@10.10.1.142:/home/usuario/mcp_tshark/tshark_server.py.new
@@ -73,13 +102,11 @@ ssh usuario@10.10.1.142 "python3 -c \"import ast; ast.parse(open('mcp_tshark/tsh
 ssh usuario@10.10.1.142 "sudo systemctl restart mcp-tshark.service"
 ```
 
-Siempre con backup previo del fichero en producción (`tshark_server.py.bak_<timestamp>`) y verificación de sintaxis antes del swap.
+Siempre con backup previo del fichero en producción (`tshark_server.py.bak_<timestamp>`) y comprobando la sintaxis antes de reemplazarlo.
 
 ### Dependencia opcional: `scandump`
 
-`escanear_a_pcap` requiere el binario [`scandump`](https://github.com/WLAN-Pi/scandump) (C, BSD-3-Clause), y `escanear_ssid` lo aprovecha si está presente. **No es obligatorio**: sin él, `escanear_ssid` cae automáticamente al parseo de `iw scan` y el resto del servidor no se entera.
-
-Se instala una sola vez en el host:
+La herramienta `escanear_a_pcap` usa el binario [`scandump`](https://github.com/WLAN-Pi/scandump) para escanear todas las bandas de una pasada sin tocar el modo monitor. No es obligatorio: si no está instalado, `escanear_ssid` simplemente cae al `iw scan` de siempre y el resto del servidor sigue funcionando igual.
 
 ```bash
 sudo apt-get install -y build-essential libnl-genl-3-dev libpcap-dev
@@ -88,8 +115,8 @@ sudo install -m 755 scandump /usr/local/bin/scandump
 sudo setcap cap_net_admin+ep /usr/local/bin/scandump
 ```
 
-El `setcap` es deliberado: escanea con `CAP_NET_ADMIN` en vez de con sudo completo. Verificar con `/sbin/getcap /usr/local/bin/scandump`.
+El `setcap` es intencional: así `scandump` escanea con `CAP_NET_ADMIN` en vez de necesitar sudo completo.
 
-## Referencias externas
+## Referencias
 
-- [WLAN Pi](https://github.com/wlan-pi) — proyecto open-source de hardware/software para troubleshooting WiFi (captura, análisis 802.11, herramientas de RF). Referencia de dominio para el enfoque de diagnóstico de cliente/RF de este proyecto.
+- [WLAN Pi](https://github.com/wlan-pi) — proyecto open-source de hardware/software para troubleshooting WiFi, usado aquí como referencia de dominio para el enfoque de diagnóstico de cliente/RF.
