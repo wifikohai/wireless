@@ -380,7 +380,7 @@ Dos líneas de la salida merecen atención:
 
 ## Capítulo 6 — Diagnóstico combinado: el atajo recomendado (3 tools)
 
-Estas tres tools no están en el prompt original de la skill de análisis WiFi del proyecto — se añadieron después para cubrir directamente los dos casos de troubleshooting más habituales sin tener que encadenar varias tools a mano. **Para el uso normal del día a día, empieza siempre por aquí antes de bajar al detalle de los Capítulos 4/5.**
+Estas tres tools se añadieron después de la primera versión de la skill de análisis WiFi del proyecto (`wireless-network-analyst`), para cubrir directamente los dos casos de troubleshooting más habituales sin tener que encadenar varias tools a mano. Ya están integradas en esa skill. **Para el uso normal del día a día, empieza siempre por aquí antes de bajar al detalle de los Capítulos 4/5.**
 
 ### `diagnosticar_autenticacion(interfaz, paquetes=30)`
 

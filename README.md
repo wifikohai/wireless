@@ -70,6 +70,7 @@ Comprueba con `claude mcp list` que aparece como `connected`.
 - [`ROADMAP.md`](ROADMAP.md) — objetivos, fases del proyecto y el registro detallado de validación contra el servidor real.
 - [`docs/guia_101_mcp_tshark.md`](docs/guia_101_mcp_tshark.md) — guía paso a paso de las 27 herramientas para quien llega sin contexto previo.
 - `.claude/skills/wireless-troubleshooting/` — catálogo de problemas ya investigados en este servidor (bugs de infraestructura, workarounds confirmados) para no repetir la depuración dos veces.
+- `.claude/skills/wireless-network-analyst/` — playbook de health checks diarios/semanales, troubleshooting de cliente, auditoría WPA2/WPA3, detección de ataques y análisis forense de PCAP usando las 27 tools.
 
 ## En qué punto va esto
 
