@@ -34,6 +34,7 @@
 - Hay un **host remoto** (una Raspberry Pi) que es quien realmente tiene el adaptador WiFi y ejecuta las capturas.
 - Ese host tiene un **servicio** corriendo (`mcp-tshark.service`) que escucha peticiones y las traduce en comandos reales (`tshark`, `iw`...).
 - Tú (o quien use esta guía) interactúas con todo esto **hablando con Claude**, no conectándote tú mismo por SSH salvo para un puñado de tareas administrativas muy concretas que se explican en el [Capítulo 7](#capítulo-7--descifrado-wpa-configurar-las-claves) y no forman parte del uso normal día a día.
+- Para que las 27 tools aparezcan en Claude hace falta que el cliente (Claude Desktop o Claude Code) tenga configurada la conexión a este servidor MCP remoto — ver "Integración MCP en el cliente" en [`README.md`](../README.md). Eso se configura una vez y no es parte del uso día a día.
 
 ---
 

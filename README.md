@@ -21,6 +21,38 @@ Alcance actual: **troubleshooting de cliente/RF** (no auditoría de seguridad ni
 - `ROADMAP.md` — objetivos, gaps identificados en el código, fases, y registro de validación contra el servidor real.
 - [`docs/guia_101_mcp_tshark.md`](docs/guia_101_mcp_tshark.md) — guía "formato 101" de las 27 tools del servidor MCP: qué hace cada una, cómo pedírselo a Claude y flujos completos de ejemplo, pensada para quien no conoce el proyecto.
 
+## Integración MCP en el cliente
+
+El servidor expone MCP sobre `streamable-http`, no `stdio`. Un cliente que solo sabe lanzar procesos locales (como Claude Desktop) necesita un puente: se usa [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) (requiere Node.js/`npx` instalado en la máquina del cliente, no en el host) para traducir stdio ↔ HTTP.
+
+**Claude Desktop** — añadir en `claude_desktop_config.json` (`%APPDATA%\Claude\claude_desktop_config.json` en Windows; `~/Library/Application Support/Claude/claude_desktop_config.json` en macOS; `~/.config/Claude/claude_desktop_config.json` en Linux):
+
+```json
+"tshark-remoto": {
+  "command": "npx",
+  "args": [
+    "-y",
+    "mcp-remote",
+    "http://10.10.1.142:8000/mcp",
+    "--allow-http",
+    "--transport",
+    "http-only"
+  ]
+}
+```
+
+- `--allow-http`: el servidor no tiene TLS (solo pensado para la LAN doméstica), así que hay que permitir HTTP explícitamente o `mcp-remote` lo rechaza.
+- `--transport http-only`: evita que `mcp-remote` pruebe primero SSE (este servidor no lo expone) antes de caer a streamable-http, así falla rápido si el host no responde en vez de colgarse en el fallback.
+- Reiniciar Claude Desktop tras editar el fichero para que recargue la config.
+
+**Claude Code (CLI)** — equivalente sin editar JSON a mano:
+
+```bash
+claude mcp add tshark-remoto -- npx -y mcp-remote http://10.10.1.142:8000/mcp --allow-http --transport http-only
+```
+
+Verificar con `claude mcp list` que queda como `connected`.
+
 ## Descifrado WPA
 
 Desactivado por defecto. Para activarlo, crear a mano en el host el fichero de claves (formato UAT de Wireshark, permisos 600):
