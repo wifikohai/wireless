@@ -22,7 +22,7 @@ En total son 27 herramientas — el detalle completo de cada una, con ejemplos d
 
 ## Cómo está montado
 
-El servidor corre en una Raspberry Pi con un adaptador USB dedicado (`wlan1`, chipset MediaTek MT7612U) que es el único capaz de entrar en modo monitor — el WiFi integrado de la Pi (`wlan0`) solo puede escanear y asociarse como un cliente normal. El servicio (`mcp-tshark.service`, FastMCP sobre `streamable-http` en el puerto 8000) se despliega y se administra a mano, sin CI/CD: se edita el código en local, se copia por `scp`, se valida la sintaxis y se reinicia el servicio.
+El servidor corre en una Raspberry Pi con un adaptador USB dedicado (`wlan1`, chipset MediaTek MT7612U) que es capaz de entrar en modo monitor — el WiFi integrado de la Pi (`wlan0`) solo puede escanear y asociarse como un cliente normal. El servicio (`mcp-tshark.service`, FastMCP sobre `streamable-http` en el puerto 8000) se despliega y se administra a mano, sin CI/CD: se edita el código en local, se copia por `scp`, se valida la sintaxis y se reinicia el servicio.
 
 ## Requisitos
 
